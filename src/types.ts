@@ -9,8 +9,8 @@ export type StepOptions = {
   model?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
-  openaiDefaultQuery?: {};
-  openaiDefaultHeaders?: {};
+  openaiDefaultQuery?: Record<string, any>;
+  openaiDefaultHeaders?: Record<string, any>;
 };
 
 export type TaskMessage = {
@@ -25,4 +25,5 @@ export type TaskResult = {
   assertion?: boolean;
   query?: string;
   errorMessage?: string;
+  success?: boolean;
 };

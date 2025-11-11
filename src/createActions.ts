@@ -1,33 +1,139 @@
 import { Page } from "@playwright/test";
 import { randomUUID } from "crypto";
-import { RunnableFunctionWithParse } from "openai/lib/RunnableFunction";
 import { z } from "zod";
 import { getSanitizeOptions } from "./sanitizeHtml";
 
-export const createActions = (
-  page: Page,
-): Record<string, RunnableFunctionWithParse<any>> => {
+// --- ZOD SCHEMAS AND INFERRED TYPES ---
+
+const locatorPressKeySchema = z.object({
+  elementId: z.string(),
+  key: z.string(),
+});
+type LocatorPressKeyArgs = z.infer<typeof locatorPressKeySchema>;
+
+const pagePressKeySchema = z.object({
+  key: z.string(),
+});
+type PagePressKeyArgs = z.infer<typeof pagePressKeySchema>;
+
+const locateElementSchema = z.object({
+  cssSelector: z.string(),
+});
+type LocateElementArgs = z.infer<typeof locateElementSchema>;
+
+const locatorEvaluateSchema = z.object({
+  elementId: z.string(),
+  pageFunction: z.string(),
+});
+type LocatorEvaluateArgs = z.infer<typeof locatorEvaluateSchema>;
+
+const locatorGetAttributeSchema = z.object({
+  attributeName: z.string(),
+  elementId: z.string(),
+});
+type LocatorGetAttributeArgs = z.infer<typeof locatorGetAttributeSchema>;
+
+const locatorElementIdSchema = z.object({
+  elementId: z.string(),
+});
+type LocatorElementIdArgs = z.infer<typeof locatorElementIdSchema>;
+
+const locatorFillSchema = z.object({
+  value: z.string(),
+  elementId: z.string(),
+});
+type LocatorFillArgs = z.infer<typeof locatorFillSchema>;
+
+const pageGotoSchema = z.object({
+  url: z.string(),
+});
+type PageGotoArgs = z.infer<typeof pageGotoSchema>;
+
+const locatorSelectOptionSchema = z
+  .object({
+    elementId: z.string().optional(),
+    cssSelector: z.string().optional(),
+    value: z.union([z.string(), z.array(z.string())]).optional(),
+    label: z.union([z.string(), z.array(z.string())]).optional(),
+    index: z.union([z.number(), z.array(z.number())]).optional(),
+  })
+  .refine(
+    (data) => data.elementId !== undefined || data.cssSelector !== undefined,
+    {
+      message: "Either elementId or cssSelector must be provided.",
+    },
+  )
+  .refine(
+    (data) =>
+      data.value !== undefined ||
+      data.label !== undefined ||
+      data.index !== undefined,
+    {
+      message: "At least one of value, label, or index must be provided.",
+    },
+  );
+type LocatorSelectOptionArgs = z.infer<typeof locatorSelectOptionSchema>;
+
+const expectToBeSchema = z.object({
+  actual: z.string(),
+  expected: z.string(),
+});
+type ExpectToBeArgs = z.infer<typeof expectToBeSchema>;
+
+const resultAssertionSchema = z.object({
+  assertion: z.boolean(),
+});
+type ResultAssertionArgs = z.infer<typeof resultAssertionSchema>;
+
+const resultQuerySchema = z.object({
+  query: z.string(),
+});
+type ResultQueryArgs = z.infer<typeof resultQuerySchema>;
+
+const resultErrorSchema = z.object({
+  errorMessage: z.string(),
+});
+type ResultErrorArgs = z.infer<typeof resultErrorSchema>;
+
+const locateElementsByRoleSchema = z.object({
+  role: z.string(),
+  exact: z.boolean().optional(),
+});
+type LocateElementsByRoleArgs = z.infer<typeof locateElementsByRoleSchema>;
+
+const locateElementsWithTextSchema = z.object({
+  text: z.string(),
+  exact: z.boolean().optional(),
+});
+type LocateElementsWithTextArgs = z.infer<typeof locateElementsWithTextSchema>;
+
+// --- ACTION TOOL INTERFACE ---
+
+export interface ActionTool {
+  function: (args: any) => Promise<any> | any;
+  name: string;
+  description: string;
+  parse: (args: string) => any;
+  parameters: any;
+}
+
+// --- CREATE ACTIONS FUNCTION ---
+
+export const createActions = (page: Page): Record<string, ActionTool> => {
   const getLocator = (elementId: string) => {
     return page.locator(`[data-element-id="${elementId}"]`);
   };
 
   return {
     locator_pressKey: {
-      function: async (args: { elementId: string; key: string }) => {
+      function: async (args: LocatorPressKeyArgs) => {
         const { elementId, key } = args;
         await getLocator(elementId).press(key);
         return { success: true };
       },
       name: "locator_pressKey",
       description: "Presses a key while focused on the specified element.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-            key: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorPressKeySchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
@@ -38,23 +144,18 @@ export const createActions = (
               "The name of the key to press, e.g., 'Enter', 'ArrowUp', 'a'.",
           },
         },
+        required: ["elementId", "key"],
       },
     },
     page_pressKey: {
-      function: async (args: { elementId: string; key: string }) => {
+      function: async (args: PagePressKeyArgs) => {
         const { key } = args;
         await page.keyboard.press(key);
         return { success: true };
       },
       name: "page_pressKey",
       description: "Presses a key globally on the page.",
-      parse: (args: string) => {
-        return z
-          .object({
-            key: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => pagePressKeySchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
@@ -64,10 +165,11 @@ export const createActions = (
               "The name of the key to press, e.g., 'Enter', 'ArrowDown', 'b'.",
           },
         },
+        required: ["key"],
       },
     },
     locateElement: {
-      function: async (args: { cssSelector: string }) => {
+      function: async (args: LocateElementArgs) => {
         const locator = page.locator(args.cssSelector);
         const elementId = randomUUID();
         await locator
@@ -81,478 +183,328 @@ export const createActions = (
       name: "locateElement",
       description:
         "Locates element using a CSS selector and returns elementId. This element ID can be used with other functions to perform actions on the element.",
-      parse: (args: string) => {
-        return z
-          .object({
-            cssSelector: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locateElementSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          cssSelector: {
-            type: "string",
-          },
+          cssSelector: { type: "string" },
         },
+        required: ["cssSelector"],
       },
     },
     locator_evaluate: {
-      function: async (args: { pageFunction: string; elementId: string }) => {
-        return {
-          result: await getLocator(args.elementId).evaluate(args.pageFunction),
-        };
+      function: async (args: LocatorEvaluateArgs) => {
+        const result = await getLocator(args.elementId).evaluate(
+          args.pageFunction,
+        );
+        return { result };
       },
+      name: "locator_evaluate",
       description:
         "Execute JavaScript code in the page, taking the matching element as an argument.",
-      name: "locator_evaluate",
+      parse: (args: string) => locatorEvaluateSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
           pageFunction: {
             type: "string",
             description:
               "Function to be evaluated in the page context, e.g. node => node.innerText",
           },
         },
-      },
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-            pageFunction: z.string(),
-          })
-          .parse(JSON.parse(args));
+        required: ["elementId", "pageFunction"],
       },
     },
     locator_getAttribute: {
-      function: async (args: { attributeName: string; elementId: string }) => {
-        return {
-          attributeValue: await getLocator(args.elementId).getAttribute(
-            args.attributeName,
-          ),
-        };
+      function: async (args: LocatorGetAttributeArgs) => {
+        const attributeValue = await getLocator(args.elementId).getAttribute(
+          args.attributeName,
+        );
+        return { attributeValue };
       },
       name: "locator_getAttribute",
       description: "Returns the matching element's attribute value.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-            attributeName: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) =>
+        locatorGetAttributeSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          attributeName: {
-            type: "string",
-          },
-          elementId: {
-            type: "string",
-          },
+          attributeName: { type: "string" },
+          elementId: { type: "string" },
         },
+        required: ["attributeName", "elementId"],
       },
     },
     locator_innerHTML: {
-      function: async (args: { elementId: string }) => {
-        return { innerHTML: await getLocator(args.elementId).innerHTML() };
+      function: async (args: LocatorElementIdArgs) => {
+        const innerHTML = await getLocator(args.elementId).innerHTML();
+        return { innerHTML };
       },
       name: "locator_innerHTML",
       description: "Returns the element.innerHTML.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_innerText: {
-      function: async (args: { elementId: string }) => {
-        return { innerText: await getLocator(args.elementId).innerText() };
+      function: async (args: LocatorElementIdArgs) => {
+        const innerText = await getLocator(args.elementId).innerText();
+        return { innerText };
       },
       name: "locator_innerText",
       description: "Returns the element.innerText.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_textContent: {
-      function: async (args: { elementId: string }) => {
-        return {
-          textContent: await getLocator(args.elementId).textContent(),
-        };
+      function: async (args: LocatorElementIdArgs) => {
+        const textContent = await getLocator(args.elementId).textContent();
+        return { textContent };
       },
       name: "locator_textContent",
       description: "Returns the node.textContent.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_inputValue: {
-      function: async (args: { elementId: string }) => {
-        return {
-          inputValue: await getLocator(args.elementId).inputValue(),
-        };
+      function: async (args: LocatorElementIdArgs) => {
+        const inputValue = await getLocator(args.elementId).inputValue();
+        return { inputValue };
       },
       name: "locator_inputValue",
       description:
         "Returns input.value for the selected <input> or <textarea> or <select> element.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_blur: {
-      function: async (args: { elementId: string }) => {
+      function: async (args: LocatorElementIdArgs) => {
         await getLocator(args.elementId).blur();
-
         return { success: true };
       },
       name: "locator_blur",
       description: "Removes keyboard focus from the current element.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_boundingBox: {
-      function: async (args: { elementId: string }) => {
-        return await getLocator(args.elementId).boundingBox();
+      function: async (args: LocatorElementIdArgs) => {
+        const boundingBox = await getLocator(args.elementId).boundingBox();
+        return boundingBox;
       },
       name: "locator_boundingBox",
       description:
         "This method returns the bounding box of the element matching the locator, or null if the element is not visible. The bounding box is calculated relative to the main frame viewport - which is usually the same as the browser window. The returned object has x, y, width, and height properties.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_check: {
-      function: async (args: { elementId: string }) => {
+      function: async (args: LocatorElementIdArgs) => {
         await getLocator(args.elementId).check();
-
         return { success: true };
       },
       name: "locator_check",
       description: "Ensure that checkbox or radio element is checked.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_uncheck: {
-      function: async (args: { elementId: string }) => {
+      function: async (args: LocatorElementIdArgs) => {
         await getLocator(args.elementId).uncheck();
-
         return { success: true };
       },
       name: "locator_uncheck",
       description: "Ensure that checkbox or radio element is unchecked.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_isChecked: {
-      function: async (args: { elementId: string }) => {
-        return { isChecked: await getLocator(args.elementId).isChecked() };
+      function: async (args: LocatorElementIdArgs) => {
+        const isChecked = await getLocator(args.elementId).isChecked();
+        return { isChecked };
       },
       name: "locator_isChecked",
       description: "Returns whether the element is checked.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_isEditable: {
-      function: async (args: { elementId: string }) => {
-        return {
-          isEditable: await getLocator(args.elementId).isEditable(),
-        };
+      function: async (args: LocatorElementIdArgs) => {
+        const isEditable = await getLocator(args.elementId).isEditable();
+        return { isEditable };
       },
       name: "locator_isEditable",
       description:
         "Returns whether the element is editable. Element is considered editable when it is enabled and does not have readonly property set.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_isEnabled: {
-      function: async (args: { elementId: string }) => {
-        return { isEnabled: await getLocator(args.elementId).isEnabled() };
+      function: async (args: LocatorElementIdArgs) => {
+        const isEnabled = await getLocator(args.elementId).isEnabled();
+        return { isEnabled };
       },
       name: "locator_isEnabled",
       description:
         "Returns whether the element is enabled. Element is considered enabled unless it is a <button>, <select>, <input> or <textarea> with a disabled property.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_isVisible: {
-      function: async (args: { elementId: string }) => {
-        return { isVisible: await getLocator(args.elementId).isVisible() };
+      function: async (args: LocatorElementIdArgs) => {
+        const isVisible = await getLocator(args.elementId).isVisible();
+        return { isVisible };
       },
       name: "locator_isVisible",
       description: "Returns whether the element is visible.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_clear: {
-      function: async (args: { elementId: string }) => {
+      function: async (args: LocatorElementIdArgs) => {
         await getLocator(args.elementId).clear();
-
         return { success: true };
       },
       name: "locator_clear",
       description: "Clear the input field.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_click: {
-      function: async (args: { elementId: string }) => {
+      function: async (args: LocatorElementIdArgs) => {
         await getLocator(args.elementId).click();
-
         return { success: true };
       },
       name: "locator_click",
       description: "Click an element.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_count: {
-      function: async (args: { elementId: string }) => {
-        return { elementCount: await getLocator(args.elementId).count() };
+      function: async (args: LocatorElementIdArgs) => {
+        const elementCount = await getLocator(args.elementId).count();
+        return { elementCount };
       },
       name: "locator_count",
       description: "Returns the number of elements matching the locator.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorElementIdSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          elementId: {
-            type: "string",
-          },
+          elementId: { type: "string" },
         },
+        required: ["elementId"],
       },
     },
     locator_fill: {
-      function: async (args: { value: string; elementId: string }) => {
+      function: async (args: LocatorFillArgs) => {
         await getLocator(args.elementId).fill(args.value);
-
-        return {
-          success: true,
-        };
+        return { success: true };
       },
       name: "locator_fill",
       description: "Set a value to the input field.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-            value: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => locatorFillSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          value: {
-            type: "string",
-          },
-          elementId: {
-            type: "string",
-          },
+          value: { type: "string" },
+          elementId: { type: "string" },
         },
+        required: ["value", "elementId"],
       },
     },
     page_goto: {
-      function: async (args: { url: string }) => {
-        return {
-          url: await page.goto(args.url),
-        };
+      function: async (args: PageGotoArgs) => {
+        const response = await page.goto(args.url);
+        return { url: response?.url() };
       },
       name: "page_goto",
       description: "Navigate to the specified URL.",
-      parse: (args: string) => {
-        return z
-          .object({
-            url: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => pageGotoSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
@@ -565,13 +517,7 @@ export const createActions = (
       },
     },
     locator_selectOption: {
-      function: async (args: {
-        elementId?: string;
-        cssSelector?: string;
-        value?: string | string[];
-        label?: string | string[];
-        index?: number | number[];
-      }) => {
+      function: async (args: LocatorSelectOptionArgs) => {
         const { elementId, cssSelector, value, label, index } = args;
 
         let locator;
@@ -609,34 +555,8 @@ export const createActions = (
       name: "locator_selectOption",
       description:
         "Selects option(s) in a <select> element. Requires either an elementId (obtained via locateElement) or a direct cssSelector.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string().optional(),
-            cssSelector: z.string().optional(),
-            value: z.union([z.string(), z.array(z.string())]).optional(),
-            label: z.union([z.string(), z.array(z.string())]).optional(),
-            index: z.union([z.number(), z.array(z.number())]).optional(),
-          })
-          .refine(
-            (data) =>
-              data.elementId !== undefined || data.cssSelector !== undefined,
-            {
-              message: "Either elementId or cssSelector must be provided.",
-            },
-          )
-          .refine(
-            (data) =>
-              data.value !== undefined ||
-              data.label !== undefined ||
-              data.index !== undefined,
-            {
-              message:
-                "At least one of value, label, or index must be provided.",
-            },
-          )
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) =>
+        locatorSelectOptionSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
@@ -654,31 +574,25 @@ export const createActions = (
             type: ["string", "array"],
             description:
               "Select options with matching value attribute. Can be a string or an array for multi-select.",
-            items: {
-              type: "string"
-            }
+            items: { type: "string" },
           },
           label: {
             type: ["string", "array"],
             description:
               "Select options with matching visible text. Can be a string or an array for multi-select.",
-            items: {
-              type: "string"
-            }
+            items: { type: "string" },
           },
           index: {
             type: ["number", "array"],
             description:
               "Select options by their index (zero-based). Can be a number or an array for multi-select.",
-            items: {
-              type: "number"
-            }
+            items: { type: "number" },
           },
         },
       },
     },
     expect_toBe: {
-      function: (args: { actual: string; expected: string }) => {
+      function: (args: ExpectToBeArgs) => {
         return {
           actual: args.actual,
           expected: args.expected,
@@ -688,28 +602,18 @@ export const createActions = (
       name: "expect_toBe",
       description:
         "Asserts that the actual value is equal to the expected value.",
-      parse: (args: string) => {
-        return z
-          .object({
-            actual: z.string(),
-            expected: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => expectToBeSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          actual: {
-            type: "string",
-          },
-          expected: {
-            type: "string",
-          },
+          actual: { type: "string" },
+          expected: { type: "string" },
         },
+        required: ["actual", "expected"],
       },
     },
     expect_notToBe: {
-      function: (args: { actual: string; expected: string }) => {
+      function: (args: ExpectToBeArgs) => {
         return {
           actual: args.actual,
           expected: args.expected,
@@ -719,110 +623,75 @@ export const createActions = (
       name: "expect_notToBe",
       description:
         "Asserts that the actual value is not equal to the expected value.",
-      parse: (args: string) => {
-        return z
-          .object({
-            actual: z.string(),
-            expected: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) => expectToBeSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          actual: {
-            type: "string",
-          },
-          expected: {
-            type: "string",
-          },
+          actual: { type: "string" },
+          expected: { type: "string" },
         },
+        required: ["actual", "expected"],
       },
     },
     resultAssertion: {
-      function: (args: { assertion: boolean }) => {
+      function: (args: ResultAssertionArgs) => {
         return args;
       },
-      parse: (args: string) => {
-        return z
-          .object({
-            assertion: z.boolean(),
-          })
-          .parse(JSON.parse(args));
-      },
+      name: "resultAssertion",
       description:
         "This function is called when the initial instructions asked to assert something; then 'assertion' is either true or false (boolean) depending on whether the assertion succeeded.",
-      name: "resultAssertion",
+      parse: (args: string) => resultAssertionSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          assertion: {
-            type: "boolean",
-          },
+          assertion: { type: "boolean" },
         },
+        required: ["assertion"],
       },
     },
     resultQuery: {
-      function: (args: { query: string }) => {
+      function: (args: ResultQueryArgs) => {
         return args;
       },
-      parse: (args: string) => {
-        return z
-          .object({
-            query: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      name: "resultQuery",
       description:
         "This function is called at the end when the initial instructions asked to extract data; then 'query' property is set to a text value of the extracted data.",
-      name: "resultQuery",
+      parse: (args: string) => resultQuerySchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          query: {
-            type: "string",
-          },
+          query: { type: "string" },
         },
+        required: ["query"],
       },
     },
     resultAction: {
       function: () => {
         return { success: true };
       },
-      parse: (args: string) => {
-        return z.object({}).parse(JSON.parse(args));
-      },
+      name: "resultAction",
       description:
         "This function is called at the end when the initial instructions asked to perform an action.",
-      name: "resultAction",
+      parse: (args: string) => z.object({}).parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {},
       },
     },
     resultError: {
-      function: (args: { errorMessage: string }) => {
-        return {
-          errorMessage: args.errorMessage,
-        };
+      function: (args: ResultErrorArgs) => {
+        return { errorMessage: args.errorMessage };
       },
-      parse: (args: string) => {
-        return z
-          .object({
-            errorMessage: z.string(),
-          })
-          .parse(JSON.parse(args));
-      },
+      name: "resultError",
       description:
         "If user instructions cannot be completed, then this function is used to produce the final response.",
-      name: "resultError",
+      parse: (args: string) => resultErrorSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          errorMessage: {
-            type: "string",
-          },
+          errorMessage: { type: "string" },
         },
+        required: ["errorMessage"],
       },
     },
     getVisibleStructure: {
@@ -830,227 +699,132 @@ export const createActions = (
         const sanitizeOptions = getSanitizeOptions();
         const allowedTags = sanitizeOptions.allowedTags || [];
         const allowedAttributes = sanitizeOptions.allowedAttributes;
-        const maxDepth = 30; // Можно вынести наверх файла в константу при желании
+        const maxDepth = 30;
 
-        return {
-          structure: await page.evaluate(
-            ({ allowedTags, allowedAttributes, maxDepth }) => {
-              // @ts-ignore
-              const extractVisibleStructure = (element, depth = 0) => {
-                if (!element || depth > maxDepth) return null;
+        const structure = await page.evaluate(
+          ({ allowedTags, allowedAttributes, maxDepth }) => {
+            const extractVisibleStructure = (
+              element: Element,
+              depth = 0,
+            ): any => {
+              if (!element || depth > maxDepth) return null;
 
-                const style = window.getComputedStyle(element);
-                if (
-                  style.display === "none" ||
-                  style.visibility === "hidden" ||
-                  style.opacity === "0"
-                ) {
-                  return null;
-                }
+              const style = window.getComputedStyle(element);
+              if (
+                style.display === "none" ||
+                style.visibility === "hidden" ||
+                style.opacity === "0"
+              ) {
+                return null;
+              }
 
-                const tag = element.tagName.toLowerCase();
-                if (!allowedTags.includes(tag)) {
-                  return null;
-                }
+              const tag = element.tagName.toLowerCase();
+              if (!allowedTags.includes(tag)) {
+                return null;
+              }
 
-                const node = {
-                  tag: tag,
-                  attributes: {},
-                  children: [],
-                };
-
-                const elementAttributes = element.attributes;
-                if (allowedAttributes === false) {
-                  for (let i = 0; i < elementAttributes.length; i++) {
-                    const attr = elementAttributes[i];
-                    // @ts-ignore
-                    node.attributes[attr.name] = attr.value;
-                  }
-                } else if (typeof allowedAttributes === "object") {
-                  const allowedForAll = allowedAttributes["*"];
-                  const allowedForTag = allowedAttributes[tag];
-
-                  // @ts-ignore
-                  const allowAllForTag = allowedForTag === true;
-                  // @ts-ignore
-                  const allowAllGlobal = allowedForAll === true;
-
-                  for (let i = 0; i < elementAttributes.length; i++) {
-                    const attr = elementAttributes[i];
-                    const attrName = attr.name;
-
-                    if (
-                      allowAllForTag ||
-                      allowAllGlobal ||
-                      (Array.isArray(allowedForTag) &&
-                        allowedForTag.includes(attrName)) ||
-                      (Array.isArray(allowedForAll) &&
-                        allowedForAll.includes(attrName))
-                    ) {
-                      // @ts-ignore
-                      node.attributes[attrName] = attr.value;
-                    }
-                  }
-                }
-
-                const id = element.id;
-                if (id) {
-                  // @ts-ignore
-                  node.id = id;
-                }
-
-                const role = element.getAttribute("role");
-                if (role) {
-                  // @ts-ignore
-                  node.role = role;
-                }
-
-                const ariaLabel = element.getAttribute("aria-label");
-                if (ariaLabel) {
-                  // @ts-ignore
-                  node.ariaLabel = ariaLabel;
-                }
-
-                const className = element.className?.trim();
-                if (className) {
-                  // @ts-ignore
-                  node.className = className;
-                }
-
-                if (
-                  element.childNodes.length === 1 &&
-                  element.childNodes[0].nodeType === 3
-                ) {
-                  const text = element.textContent?.trim() || "";
-                  if (text) {
-                    // @ts-ignore
-                    node.text =
-                      text.length > 50 ? text.slice(0, 50) + "..." : text;
-                  }
-                }
-
-                if (depth + 1 < maxDepth) {
-                  for (let i = 0; i < element.children.length; i++) {
-                    const child = extractVisibleStructure(
-                      element.children[i],
-                      depth + 1,
-                    );
-                    if (child) {
-                      // @ts-ignore
-                      node.children.push(child);
-                    }
-                  }
-                }
-
-                return node;
+              const node: any = {
+                tag: tag,
+                attributes: {},
+                children: [],
               };
 
-              return extractVisibleStructure(document.body);
-            },
-            { allowedTags, allowedAttributes, maxDepth },
-          ),
-        };
+              const elementAttributes = element.attributes;
+              if (allowedAttributes === false) {
+                for (let i = 0; i < elementAttributes.length; i++) {
+                  const attr = elementAttributes[i];
+                  node.attributes[attr.name] = attr.value;
+                }
+              } else if (typeof allowedAttributes === "object") {
+                const allowedForAll = (allowedAttributes as any)["*"];
+                const allowedForTag = (allowedAttributes as any)[tag];
+
+                const allowAllForTag = allowedForTag === true;
+                const allowAllGlobal = allowedForAll === true;
+
+                for (let i = 0; i < elementAttributes.length; i++) {
+                  const attr = elementAttributes[i];
+                  const attrName = attr.name;
+
+                  if (
+                    allowAllForTag ||
+                    allowAllGlobal ||
+                    (Array.isArray(allowedForTag) &&
+                      allowedForTag.includes(attrName)) ||
+                    (Array.isArray(allowedForAll) &&
+                      allowedForAll.includes(attrName))
+                  ) {
+                    node.attributes[attrName] = attr.value;
+                  }
+                }
+              }
+
+              const id = element.id;
+              if (id) {
+                node.id = id;
+              }
+
+              const role = element.getAttribute("role");
+              if (role) {
+                node.role = role;
+              }
+
+              const ariaLabel = element.getAttribute("aria-label");
+              if (ariaLabel) {
+                node.ariaLabel = ariaLabel;
+              }
+
+              const className = element.className?.toString().trim();
+              if (className) {
+                node.className = className;
+              }
+
+              if (
+                element.childNodes.length === 1 &&
+                element.childNodes[0].nodeType === 3
+              ) {
+                const text = element.textContent?.trim() || "";
+                if (text) {
+                  node.text =
+                    text.length > 50 ? text.slice(0, 50) + "..." : text;
+                }
+              }
+
+              if (depth + 1 < maxDepth) {
+                for (let i = 0; i < element.children.length; i++) {
+                  const child = extractVisibleStructure(
+                    element.children[i],
+                    depth + 1,
+                  );
+                  if (child) {
+                    node.children.push(child);
+                  }
+                }
+              }
+
+              return node;
+            };
+
+            return extractVisibleStructure(document.body);
+          },
+          { allowedTags, allowedAttributes, maxDepth },
+        );
+
+        return { structure };
       },
       name: "getVisibleStructure",
       description:
         "Returns a simplified hierarchical structure of visible DOM elements, focusing on roles, attributes, and basic content.",
-      parse: (args: string) => {
-        return z.object({}).parse(JSON.parse(args));
-      },
+      parse: (args: string) => z.object({}).parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {},
       },
     },
     locateElementsByRole: {
-      function: async (args: {
-        role:
-          | "alert"
-          | "alertdialog"
-          | "application"
-          | "article"
-          | "banner"
-          | "blockquote"
-          | "button"
-          | "caption"
-          | "cell"
-          | "checkbox"
-          | "code"
-          | "columnheader"
-          | "combobox"
-          | "complementary"
-          | "contentinfo"
-          | "definition"
-          | "deletion"
-          | "dialog"
-          | "directory"
-          | "document"
-          | "emphasis"
-          | "feed"
-          | "figure"
-          | "form"
-          | "generic"
-          | "grid"
-          | "gridcell"
-          | "group"
-          | "heading"
-          | "img"
-          | "insertion"
-          | "link"
-          | "list"
-          | "listbox"
-          | "listitem"
-          | "log"
-          | "main"
-          | "marquee"
-          | "math"
-          | "menu"
-          | "menubar"
-          | "menuitem"
-          | "menuitemcheckbox"
-          | "menuitemradio"
-          | "meter"
-          | "navigation"
-          | "none"
-          | "note"
-          | "option"
-          | "paragraph"
-          | "presentation"
-          | "progressbar"
-          | "radio"
-          | "radiogroup"
-          | "region"
-          | "row"
-          | "rowgroup"
-          | "rowheader"
-          | "scrollbar"
-          | "search"
-          | "searchbox"
-          | "separator"
-          | "slider"
-          | "spinbutton"
-          | "status"
-          | "strong"
-          | "subscript"
-          | "superscript"
-          | "switch"
-          | "tab"
-          | "table"
-          | "tablist"
-          | "tabpanel"
-          | "term"
-          | "textbox"
-          | "time"
-          | "timer"
-          | "toolbar"
-          | "tooltip"
-          | "tree"
-          | "treegrid"
-          | "treeitem";
-        exact?: boolean;
-      }) => {
+      function: async (args: LocateElementsByRoleArgs) => {
         const locators = await page
-          .getByRole(args.role, { exact: args.exact ?? false })
+          .getByRole(args.role as any, { exact: args.exact ?? false })
           .all();
         const elementIds: string[] = [];
 
@@ -1071,14 +845,8 @@ export const createActions = (
       name: "locateElementsByRole",
       description:
         "Finds elements by their ARIA role attribute and returns array of element IDs.",
-      parse: (args: string) => {
-        return z
-          .object({
-            role: z.string(),
-            exact: z.boolean().optional(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) =>
+        locateElementsByRoleSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
@@ -1097,7 +865,7 @@ export const createActions = (
       },
     },
     locateElementsWithText: {
-      function: async (args: { text: string; exact?: boolean }) => {
+      function: async (args: LocateElementsWithTextArgs) => {
         const allLocators = await page
           .getByText(args.text, { exact: args.exact ?? false })
           .all();
@@ -1123,272 +891,15 @@ export const createActions = (
       name: "locateElementsWithText",
       description:
         "Finds visible elements containing specified text and returns array of element IDs. Hidden elements are excluded.",
-      parse: (args: string) => {
-        return z
-          .object({
-            text: z.string(),
-            exact: z.boolean().optional(),
-          })
-          .parse(JSON.parse(args));
-      },
+      parse: (args: string) =>
+        locateElementsWithTextSchema.parse(JSON.parse(args)),
       parameters: {
         type: "object",
         properties: {
-          text: {
-            type: "string",
-            description: "Text to search for within elements.",
-          },
-          exact: {
-            type: "boolean",
-            description:
-              "Whether to match the text exactly or allow partial matches.",
-          },
+          text: { type: "string" },
+          exact: { type: "boolean" },
         },
         required: ["text"],
-      },
-    },
-    waitForContentToLoad: {
-      function: async (args: {
-        selector: string;
-        textMarker?: string;
-        timeout?: number;
-      }) => {
-        try {
-          if (args.textMarker) {
-            await page.waitForSelector(
-              `${args.selector}:has-text("${args.textMarker}")`,
-              {
-                timeout: args.timeout || 30000,
-                state: "visible",
-              },
-            );
-          } else {
-            await page.waitForSelector(args.selector, {
-              timeout: args.timeout || 30000,
-              state: "visible",
-            });
-          }
-          return { success: true };
-        } catch (error) {
-          return {
-            success: false,
-            error: `Timeout waiting for content to load: ${error.message}`,
-          };
-        }
-      },
-      name: "waitForContentToLoad",
-      description:
-        "Waits for dynamic content to load based on selector and optional text marker.",
-      parse: (args: string) => {
-        return z
-          .object({
-            selector: z.string(),
-            textMarker: z.string().optional(),
-            timeout: z.number().optional(),
-          })
-          .parse(JSON.parse(args));
-      },
-      parameters: {
-        type: "object",
-        properties: {
-          selector: {
-            type: "string",
-            description: "CSS selector to wait for.",
-          },
-          textMarker: {
-            type: "string",
-            description:
-              "Optional text content to wait for within the selector.",
-          },
-          timeout: {
-            type: "number",
-            description:
-              "Maximum time to wait in milliseconds. Default is 30000 (30 seconds).",
-          },
-        },
-        required: ["selector"],
-      },
-    },
-    extractVisibleText: {
-      function: async (args: { elementId?: string; selector?: string }) => {
-        let result;
-
-        if (args.elementId) {
-          result = await getLocator(args.elementId).evaluate(
-            (node: Element) => {
-              const getVisibleText = (element: Element | Node): string => {
-                if (element.nodeType === 3) {
-                  return element.textContent?.trim() || "";
-                }
-
-                if (element instanceof Element) {
-                  const style = window.getComputedStyle(element);
-                  if (
-                    style.display === "none" ||
-                    style.visibility === "hidden" ||
-                    style.opacity === "0"
-                  ) {
-                    return "";
-                  }
-
-                  let text = "";
-                  Array.from(element.childNodes).forEach((child) => {
-                    text += getVisibleText(child);
-                  });
-
-                  return text;
-                }
-
-                return "";
-              };
-
-              return getVisibleText(node);
-            },
-          );
-        } else if (args.selector) {
-          result = await page.evaluate((selector: string) => {
-            const elements = document.querySelectorAll(selector);
-            let allText = "";
-
-            elements.forEach((element) => {
-              const style = window.getComputedStyle(element);
-              if (
-                style.display !== "none" &&
-                style.visibility !== "hidden" &&
-                style.opacity !== "0"
-              ) {
-                allText += (element.textContent?.trim() || "") + " ";
-              }
-            });
-
-            return allText.trim();
-          }, args.selector);
-        } else {
-          throw new Error("Either elementId or selector must be provided");
-        }
-
-        return { text: result };
-      },
-      name: "extractVisibleText",
-      description:
-        "Extracts only visible text from elements, ignoring hidden content.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string().optional(),
-            selector: z.string().optional(),
-          })
-          .refine(
-            (data) =>
-              data.elementId !== undefined || data.selector !== undefined,
-            {
-              message: "Either elementId or selector must be provided",
-            },
-          )
-          .parse(JSON.parse(args));
-      },
-      parameters: {
-        type: "object",
-        properties: {
-          elementId: {
-            type: "string",
-            description: "ID of the element to extract text from.",
-          },
-          selector: {
-            type: "string",
-            description: "CSS selector to locate elements for text extraction.",
-          },
-        },
-      },
-    },
-    scrollIntoElementView: {
-      function: async (args: { elementId: string; behavior?: string }) => {
-        await getLocator(args.elementId).evaluate(
-          (node: Element, behavior: string | undefined) => {
-            node.scrollIntoView({
-              behavior: (behavior as "auto" | "smooth") || "smooth",
-              block: "center",
-            });
-          },
-          args.behavior,
-        );
-
-        await page.waitForTimeout(500);
-
-        return { success: true };
-      },
-      name: "scrollIntoElementView",
-      description:
-        "Scrolls to bring an element into view, useful for loading content dynamically as user scrolls.",
-      parse: (args: string) => {
-        return z
-          .object({
-            elementId: z.string(),
-            behavior: z.enum(["auto", "smooth"]).optional(),
-          })
-          .parse(JSON.parse(args));
-      },
-      parameters: {
-        type: "object",
-        properties: {
-          elementId: {
-            type: "string",
-            description: "ID of the element to scroll into view.",
-          },
-          behavior: {
-            type: "string",
-            enum: ["auto", "smooth"],
-            description:
-              "Scrolling behavior: 'auto' for instant scrolling or 'smooth' for animated scrolling.",
-          },
-        },
-        required: ["elementId"],
-      },
-    },
-    waitForNetworkIdle: {
-      function: async (args: { timeout?: number; idleTime?: number }) => {
-        try {
-          await page.waitForLoadState("networkidle", {
-            timeout: args.timeout || 30000,
-          });
-
-          if (args.idleTime) {
-            await page.waitForTimeout(args.idleTime);
-          }
-
-          return { success: true };
-        } catch (error) {
-          return {
-            success: false,
-            error: `Timeout waiting for network idle: ${error.message}`,
-          };
-        }
-      },
-      name: "waitForNetworkIdle",
-      description:
-        "Waits for network activity to be minimal or stopped, useful for SPA applications.",
-      parse: (args: string) => {
-        return z
-          .object({
-            timeout: z.number().optional(),
-            idleTime: z.number().optional(),
-          })
-          .parse(JSON.parse(args));
-      },
-      parameters: {
-        type: "object",
-        properties: {
-          timeout: {
-            type: "number",
-            description:
-              "Maximum time to wait in milliseconds. Default is 30000 (30 seconds).",
-          },
-          idleTime: {
-            type: "number",
-            description:
-              "Additional wait time after network becomes idle, in milliseconds.",
-          },
-        },
       },
     },
   };

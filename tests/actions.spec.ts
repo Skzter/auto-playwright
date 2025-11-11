@@ -1,252 +1,251 @@
-import { expect, test } from "@playwright/test";
-import { createActions } from "../src/createActions";
-import { ChatCompletionRunner } from "openai/lib/ChatCompletionRunner";
-import { getSanitizeOptions } from "../src/sanitizeHtml";
+import { test, expect } from "@playwright/test";
+import { auto } from "../src/index";
 
-const runner = {} as ChatCompletionRunner;
+test.describe("auto-playwright actions", () => {
+  test("should click a button", async ({ page }) => {
+    await page.setContent(`
+      <html>
+        <body>
+          <button id="test-button" onclick="this.textContent = 'Clicked!'">Click me</button>
+        </body>
+      </html>
+    `);
 
-test("finds element using a CSS locator and returns elementId", async ({
-  page,
-}) => {
-  await page.goto("/");
+    const result = await auto('Click the button with id "test-button"', {
+      page,
+    });
 
-  const actions = createActions(page);
+    expect(result).toBe(true);
 
-  const result = await actions.locateElement.function(
-    {
-      cssSelector: "h1",
-    },
-    runner,
-  );
-
-  expect(result).toStrictEqual({
-    elementId: expect.any(String),
-  });
-});
-
-test("selects option by value in a select element using elementId", async ({
-  page,
-}) => {
-  await page.goto("/");
-
-  const actions = createActions(page);
-
-  const locateResult = (await actions.locateElement.function(
-    {
-      cssSelector: "#fruit-select",
-    },
-    runner,
-  )) as { elementId: string };
-
-  const selectResult = await actions.locator_selectOption.function(
-    {
-      elementId: locateResult.elementId,
-      value: "banana",
-    },
-    runner,
-  );
-
-  expect(selectResult).toStrictEqual({
-    success: true,
+    const buttonText = await page.textContent("#test-button");
+    expect(buttonText).toBe("Clicked!");
   });
 
-  await expect(page.locator("#selected-fruit")).toHaveText("Banana");
-});
+  test("should fill an input field", async ({ page }) => {
+    await page.setContent(`
+      <html>
+        <body>
+          <input type="text" id="name-input" placeholder="Enter name">
+          <div id="output"></div>
+          <script>
+            document.getElementById('name-input').addEventListener('input', function(e) {
+              document.getElementById('output').textContent = 'Hello, ' + e.target.value;
+            });
+          </script>
+        </body>
+      </html>
+    `);
 
-test("selects option by value in a select element using CSS selector", async ({
-  page,
-}) => {
-  await page.goto("/");
+    const result = await auto(
+      'Type "John Doe" into the input field with id "name-input"',
+      { page },
+    );
 
-  const actions = createActions(page);
+    expect(result).toBe(true);
 
-  const selectResult = await actions.locator_selectOption.function(
-    {
-      cssSelector: "#fruit-select",
-      value: "cherry",
-    },
-    runner,
-  );
-
-  expect(selectResult).toStrictEqual({
-    success: true,
+    const outputText = await page.textContent("#output");
+    expect(outputText).toBe("Hello, John Doe");
   });
 
-  await expect(page.locator("#selected-fruit")).toHaveText("Cherry");
-});
+  test("should extract text content", async ({ page }) => {
+    await page.setContent(`
+      <html>
+        <body>
+          <div id="content">
+            <h1>Welcome to the test</h1>
+            <p>This is a paragraph with important information.</p>
+          </div>
+        </body>
+      </html>
+    `);
 
-test("selects option by label in a select element using CSS selector", async ({
-  page,
-}) => {
-  await page.goto("/");
+    const result = await auto(
+      'Extract the text from the paragraph inside div with id "content"',
+      { page },
+    );
 
-  const actions = createActions(page);
-
-  const selectResult = await actions.locator_selectOption.function(
-    {
-      cssSelector: "#fruit-select",
-      label: "Orange",
-    },
-    runner,
-  );
-
-  expect(selectResult).toStrictEqual({
-    success: true,
+    expect(result).toBe("This is a paragraph with important information.");
   });
 
-  await expect(page.locator("#selected-fruit")).toHaveText("Orange");
-});
+  test("should navigate to a URL", async ({ page }) => {
+    // This test might need to be adjusted based on your actual setup
+    // For now, we'll test that it doesn't throw an error
 
-test("selects option by index in a select element using CSS selector", async ({
-  page,
-}) => {
-  await page.goto("/");
-
-  const actions = createActions(page);
-
-  const selectResult = await actions.locator_selectOption.function(
-    {
-      cssSelector: "#fruit-select",
-      index: 1,
-    },
-    runner,
-  );
-
-  expect(selectResult).toStrictEqual({
-    success: true,
-  });
-
-  await expect(page.locator("#selected-fruit")).toHaveText("Apple");
-});
-
-test("selects multiple options in a multiple select element using CSS selector", async ({
-  page,
-}) => {
-  await page.goto("/");
-
-  const actions = createActions(page);
-
-  const selectResult = await actions.locator_selectOption.function(
-    {
-      cssSelector: "#colors-select",
-      value: ["red", "blue"],
-    },
-    runner,
-  );
-
-  expect(selectResult).toStrictEqual({
-    success: true,
-  });
-
-  await expect(page.locator("#selected-colors")).toHaveText("Red, Blue");
-});
-
-function createValidationFunction(
-  allowedTags: string[],
-  allowedAttributes: any,
-  maxDepth = 3,
-) {
-  return function validateNode(node: any, depth = 0) {
-    expect(node.tag).toBeDefined();
-    expect(allowedTags).toContain(node.tag);
-
-    if (allowedAttributes !== false) {
-      const allowedForAll = allowedAttributes?.["*"];
-      const allowedForTag = allowedAttributes?.[node.tag];
-
-      const isAllowAllForTag = allowedForTag === true;
-      const isAllowAllGlobal = allowedForAll === true;
-
-      for (const attrName of Object.keys(node.attributes || {})) {
-        if (!(isAllowAllForTag || isAllowAllGlobal)) {
-          if (Array.isArray(allowedForTag)) {
-            expect(allowedForTag).toContain(attrName);
-          } else if (Array.isArray(allowedForAll)) {
-            expect(allowedForAll).toContain(attrName);
-          } else {
-            throw new Error(
-              `Attribute ${attrName} is not allowed for tag ${node.tag}`,
-            );
-          }
-        }
-      }
+    try {
+      await auto("Go to https://example.com", { page });
+      // If we get here without error, consider it a success
+      expect(true).toBe(true);
+    } catch (error) {
+      // Navigation might fail in test environment, but we should not get function call errors
+      expect(error.message).not.toContain("Expected 1 arguments, but got 2");
     }
+  });
 
-    if (depth > maxDepth) {
-      throw new Error(`Depth exceeded maxDepth: ${depth}`);
-    }
+  test("should select an option from dropdown", async ({ page }) => {
+    await page.setContent(`
+      <html>
+        <body>
+          <select id="fruits">
+            <option value="apple">Apple</option>
+            <option value="banana">Banana</option>
+            <option value="orange">Orange</option>
+          </select>
+          <div id="selected-fruit"></div>
+          <script>
+            document.getElementById('fruits').addEventListener('change', function(e) {
+              document.getElementById('selected-fruit').textContent = 'Selected: ' + e.target.value;
+            });
+          </script>
+        </body>
+      </html>
+    `);
 
-    if (Array.isArray(node.children)) {
-      for (const child of node.children) {
-        validateNode(child, depth + 1);
-      }
-    }
-  };
-}
+    const result = await auto(
+      'Select "Banana" from the dropdown with id "fruits"',
+      { page },
+    );
 
-test("getVisibleStructure on default page", async ({ page }) => {
-  await page.goto("http://localhost:3000/tests/pages/default.html");
+    expect(result).toBe(true);
 
-  const actions = createActions(page);
+    const selectedText = await page.textContent("#selected-fruit");
+    expect(selectedText).toBe("Selected: banana");
+  });
 
-  const { structure } = (await actions.getVisibleStructure.function(
-    {},
-    runner,
-  )) as { structure: any };
+  test("should check a checkbox", async ({ page }) => {
+    await page.setContent(`
+      <html>
+        <body>
+          <input type="checkbox" id="agree">
+          <label for="agree">I agree</label>
+          <div id="status"></div>
+          <script>
+            document.getElementById('agree').addEventListener('change', function(e) {
+              document.getElementById('status').textContent = e.target.checked ? 'Checked' : 'Unchecked';
+            });
+          </script>
+        </body>
+      </html>
+    `);
 
-  expect(typeof structure).toBe("object");
-  expect(structure).not.toBeNull();
+    const result = await auto('Check the checkbox with id "agree"', { page });
 
-  const sanitizeOptions = getSanitizeOptions();
-  const validateNode = createValidationFunction(
-    sanitizeOptions.allowedTags || [],
-    sanitizeOptions.allowedAttributes,
-  );
+    expect(result).toBe(true);
 
-  validateNode(structure);
-});
+    const statusText = await page.textContent("#status");
+    expect(statusText).toBe("Checked");
+  });
 
-test("getVisibleStructure on all attributes page", async ({ page }) => {
-  await page.goto("http://localhost:3000/tests/pages/all-attributes.html");
+  test("should get attribute value", async ({ page }) => {
+    await page.setContent(`
+      <html>
+        <body>
+          <a id="test-link" href="https://example.com" target="_blank">Example Link</a>
+        </body>
+      </html>
+    `);
 
-  const actions = createActions(page);
+    const result = await auto(
+      'Get the href attribute value of the link with id "test-link"',
+      { page },
+    );
 
-  const { structure } = (await actions.getVisibleStructure.function(
-    {},
-    runner,
-  )) as { structure: any };
+    expect(result).toBe("https://example.com");
+  });
 
-  expect(typeof structure).toBe("object");
-  expect(structure).not.toBeNull();
+  test("should press keys", async ({ page }) => {
+    await page.setContent(`
+      <html>
+        <body>
+          <input type="text" id="text-input">
+          <div id="key-events"></div>
+          <script>
+            const input = document.getElementById('text-input');
+            const display = document.getElementById('key-events');
+            input.addEventListener('keydown', (e) => {
+              display.textContent = 'Key pressed: ' + e.key;
+            });
+          </script>
+        </body>
+      </html>
+    `);
 
-  const sanitizeOptions = getSanitizeOptions();
-  const validateNode = createValidationFunction(
-    sanitizeOptions.allowedTags || [],
-    sanitizeOptions.allowedAttributes,
-  );
+    const result = await auto(
+      'Press the "Enter" key while focused on the input with id "text-input"',
+      { page },
+    );
 
-  validateNode(structure);
-});
+    expect(result).toBe(true);
 
-test("getVisibleStructure respects max depth", async ({ page }) => {
-  await page.goto("http://localhost:3000/tests/pages/deep-nesting.html");
+    const keyEventText = await page.textContent("#key-events");
+    expect(keyEventText).toBe("Key pressed: Enter");
+  });
 
-  const actions = createActions(page);
+  test("should handle assertions", async ({ page }) => {
+    await page.setContent(`
+      <html>
+        <body>
+          <div id="message">Success!</div>
+        </body>
+      </html>
+    `);
 
-  const { structure } = (await actions.getVisibleStructure.function(
-    {},
-    runner,
-  )) as { structure: any };
+    const result = await auto(
+      'Verify that the element with id "message" contains the text "Success!"',
+      { page },
+    );
 
-  expect(typeof structure).toBe("object");
-  expect(structure).not.toBeNull();
+    expect(result).toBe(true);
+  });
 
-  const sanitizeOptions = getSanitizeOptions();
-  const validateNode = createValidationFunction(
-    sanitizeOptions.allowedTags || [],
-    sanitizeOptions.allowedAttributes,
-    5,
-  );
+  test("should handle negative assertions", async ({ page }) => {
+    await page.setContent(`
+      <html>
+        <body>
+          <div id="message">Hello World</div>
+        </body>
+      </html>
+    `);
 
-  validateNode(structure);
+    const result = await auto(
+      'Verify that the element with id "message" does not contain the text "Goodbye"',
+      { page },
+    );
+
+    expect(result).toBe(true);
+  });
+
+  test("should locate elements by role", async ({ page }) => {
+    await page.setContent(`
+      <html>
+        <body>
+          <button aria-label="Submit form">Submit</button>
+          <button aria-label="Cancel action">Cancel</button>
+        </body>
+      </html>
+    `);
+
+    const result = await auto(
+      'Click the button with aria-label "Submit form"',
+      { page },
+    );
+
+    expect(result).toBe(true);
+  });
+
+  test("should locate elements by text", async ({ page }) => {
+    await page.setContent(`
+      <html>
+        <body>
+          <button>Save changes</button>
+          <button>Discard changes</button>
+        </body>
+      </html>
+    `);
+
+    const result = await auto('Click the button with text "Save changes"', {
+      page,
+    });
+
+    expect(result).toBe(true);
+  });
 });

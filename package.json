@@ -1,67 +1,28 @@
 {
-  "dependencies": {
-    "@hono/node-server": "1.14.1",
-    "hono": "4.7.7",
-    "openai": "4.96.0",
-    "playwright": "1.52.0",
-    "sanitize-html": "2.16.0",
-    "zod": "3.24.3"
-  },
-  "author": {
-    "name": "Luc Gagan",
-    "email": "luc@ray.run",
-    "url": "https://ray.run"
-  },
-  "license": "MIT",
-  "files": [
-    "dist"
-  ],
-  "homepage": "https://ray.run",
-  "keywords": [
-    "openai",
-    "playwright",
-    "test"
-  ],
-  "peerDependencies": {
-    "@playwright/test": "^1.39.0"
-  },
-  "release": {
-    "branches": [
-      "main"
-    ]
-  },
-  "name": "auto-playwright",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
-  "sideEffects": false,
-  "description": "Automate Playwright tests using ChatGPT.",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/lucgagan/auto-playwright"
-  },
-  "devDependencies": {
-    "@playwright/test": "1.52.0",
-    "@types/node": "20.17.30",
-    "@types/sanitize-html": "2.15.0",
-    "knip": "5.50.5",
-    "prettier": "3.5.3",
-    "semantic-release": "24.2.3",
-    "tsx": "4.19.3",
-    "typescript": "5.8.3"
-  },
+  "name": "auto-playwright-ai",
+  "version": "1.0.0",
+  "description": "AI-powered Playwright automation with OpenAI",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "start": "tsx ./tests/bin/startServer.ts",
-    "build": "tsc --project tsconfig.build.json",
-    "format": "prettier --write ./src",
-    "lint": "prettier --check ./src && knip",
-    "semantic-release": "semantic-release",
+    "build": "tsc",
+    "dev": "tsc --watch",
     "test": "playwright test"
   },
-  "version": "0.0.0-development"
+  "dependencies": {
+    "@hono/node-server": "^1.19.6",
+    "hono": "^4.10.5",
+    "openai": "^4.20.0",
+    "sanitize-html": "^2.11.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@types/node": "^20.19.24",
+    "@types/sanitize-html": "^2.16.0",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@playwright/test": "^1.40.0"
+  }
 }

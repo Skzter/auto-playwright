@@ -1,8 +1,32 @@
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": false,
-    "outDir": "dist"
+  "name": "auto-playwright-ai",
+  "version": "1.0.0",
+  "description": "AI-powered Playwright automation with OpenAI",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
+    "build:watch": "tsc --watch",
+    "dev": "tsc --watch",
+    "test": "playwright test",
+    "test:server": "tsx tests/bin/startServer.ts",
+    "type-check": "tsc --noEmit"
   },
-  "include": ["src"]
+  "dependencies": {
+    "openai": "^4.20.0",
+    "zod": "^3.22.0",
+    "sanitize-html": "^2.11.0",
+    "hono": "^4.0.0",
+    "@hono/node-server": "^1.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "tsx": "^4.0.0"
+  },
+  "peerDependencies": {
+    "@playwright/test": "^1.40.0"
+  }
 }
